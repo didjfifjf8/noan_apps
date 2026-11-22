@@ -1,0 +1,6 @@
+{
+  "name": "PyForge",
+  "description": "Offline Python 3 IDE with real CPython runtime, library manager, code notes, and project workspace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
