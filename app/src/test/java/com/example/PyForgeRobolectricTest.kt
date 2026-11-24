@@ -12,10 +12,15 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.NoteEntity
 import com.example.data.db.NotesRepository
 import com.example.data.db.PyForgeDatabase
+import com.example.data.db.StudyBlockEntity
+import com.example.data.db.StudyBlockType
+import com.example.data.db.StudyBookRepository
+import com.example.data.db.StudyJsonCodec
 import com.example.data.settings.SettingsRepository
 import com.example.data.workspace.WorkspaceRepository
 import com.example.python.CompletionItem
 import com.example.python.ExecutionOutputCallback
+import com.example.python.HighlightTextUtils
 import com.example.python.InputProvider
 import com.example.python.InstallProgressCallback
 import com.example.python.LibrariesCatalog
@@ -34,6 +39,9 @@ import com.example.ui.viewmodel.LibrariesViewModel
 import com.example.ui.viewmodel.NotesViewModel
 import com.example.ui.viewmodel.ProjectsViewModel
 import com.example.ui.viewmodel.SettingsViewModel
+import com.example.ui.viewmodel.StudyBookViewModel
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithText
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -153,19 +161,22 @@ class PyForgeRobolectricTest {
     }
 
     @Test
-    fun `compose navigation across all 5 ide tabs`() {
+    fun `compose navigation across all 5 ide tabs and kitobcha switch`() {
         val fakeRuntime = FakePythonRuntime()
         val notesRepo = NotesRepository(db.noteDao())
+        val studyRepo = StudyBookRepository(context, db.studyDao())
         val workspaceRepo = WorkspaceRepository(context, db.projectMetaDao())
         val settingsRepo = SettingsRepository(context)
         runBlocking {
             notesRepo.seedDefaultsIfEmpty()
+            studyRepo.seedDefaultTopicIfEmpty()
             workspaceRepo.ensureStarterWorkspace()
         }
 
         val editorVm = EditorViewModel(fakeRuntime, workspaceRepo, settingsRepo)
         val librariesVm = LibrariesViewModel(fakeRuntime, workspaceRepo)
         val notesVm = NotesViewModel(notesRepo)
+        val studyVm = StudyBookViewModel(studyRepo, notesRepo)
         val projectsVm = ProjectsViewModel(workspaceRepo)
         val settingsVm = SettingsViewModel(settingsRepo, fakeRuntime, workspaceRepo)
 
@@ -175,6 +186,7 @@ class PyForgeRobolectricTest {
                     editorViewModel = editorVm,
                     librariesViewModel = librariesVm,
                     notesViewModel = notesVm,
+                    studyBookViewModel = studyVm,
                     projectsViewModel = projectsVm,
                     settingsViewModel = settingsVm,
                 )
@@ -192,6 +204,21 @@ class PyForgeRobolectricTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("notes_search_input").assertIsDisplayed()
 
+        // Switch into Kitobcha inside My Notes
+        composeRule.onNodeWithTag("notes_mode_kitobcha").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("study_book_search_input").assertIsDisplayed()
+        composeRule.onNodeWithTag("study_book_fab_add").assertIsDisplayed()
+        composeRule.onNodeWithText("Dinamik Dasturlash (DP)").assertIsDisplayed()
+
+        // Open new topic in Kitobcha
+        composeRule.onNodeWithTag("study_book_fab_add").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithTag("study_topic_title_input").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("study_topic_title_input").assertIsDisplayed()
+        composeRule.onNodeWithTag("study_add_diagram_block").assertExists()
+
         composeRule.onNodeWithTag("nav_projects").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("projects_new_file_button").assertIsDisplayed()
@@ -199,6 +226,86 @@ class PyForgeRobolectricTest {
         composeRule.onNodeWithTag("nav_settings").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("toggle_auto_save").assertIsDisplayed()
+    }
+
+    @Test
+    fun `study book repository blocks ordering and persistence`() = runBlocking {
+        val studyRepo = StudyBookRepository(context, db.studyDao())
+        studyRepo.seedDefaultTopicIfEmpty()
+
+        val topics = studyRepo.searchTopics("All", "").first()
+        assertEquals(1, topics.size)
+        assertEquals("Dinamik Dasturlash (DP)", topics.first().title)
+
+        val dpBlocks = studyRepo.getBlocks(topics.first().id)
+        assertEquals(3, dpBlocks.size)
+        assertEquals(StudyBlockType.TEXT.raw, dpBlocks[0].blockType)
+        assertEquals(StudyBlockType.CODE_NOTE.raw, dpBlocks[1].blockType)
+        assertEquals(StudyBlockType.DIAGRAM.raw, dpBlocks[2].blockType)
+
+        val topicId = studyRepo.createTopic("Graflar nazariyasi", "Algorithms")
+        val codeId = studyRepo.addBlock(
+            topicId,
+            StudyBlockEntity(
+                topicId = topicId,
+                orderIndex = 0,
+                blockType = StudyBlockType.CODE_NOTE.raw,
+                primaryText = "def bfs(g): pass",
+                secondaryText = "Kenglik bo'yicha qidiruv",
+            ),
+        )
+        assertTrue(codeId > 0)
+
+        var blocks = studyRepo.getBlocks(topicId)
+        assertEquals(2, blocks.size)
+        assertEquals(StudyBlockType.TEXT.raw, blocks[0].blockType)
+        assertEquals(StudyBlockType.CODE_NOTE.raw, blocks[1].blockType)
+
+        studyRepo.moveBlock(topicId, codeId, -1)
+        blocks = studyRepo.getBlocks(topicId)
+        assertEquals(StudyBlockType.CODE_NOTE.raw, blocks[0].blockType)
+        assertEquals(0, blocks[0].orderIndex)
+        assertEquals(1, blocks[1].orderIndex)
+
+        studyRepo.deleteTopic(topicId)
+        assertEquals(null, studyRepo.getTopicById(topicId))
+    }
+
+    @Test
+    fun `highlighter spans and linear diagram json codec work accurately`() {
+        val sample = "Dinamik dasturlash usuli"
+        val word = HighlightTextUtils.wordRangeAt(sample, 10)
+        assertEquals(8 until 18, word)
+
+        val added = HighlightTextUtils.addHighlight(emptyList(), 0, 7, "yellow")
+        val second = HighlightTextUtils.addHighlight(added, 5, 18, "green")
+        assertEquals(2, second.size)
+        assertEquals(0, second[0].start)
+        assertEquals(5, second[0].end)
+        assertEquals("yellow", second[0].colorKey)
+        assertEquals(5, second[1].start)
+        assertEquals(18, second[1].end)
+        assertEquals("green", second[1].colorKey)
+
+        val shifted = HighlightTextUtils.adjustSpansForTextEdit(
+            oldText = "Salom dunyo",
+            newText = "Salom katta dunyo",
+            spans = HighlightTextUtils.addHighlight(emptyList(), 6, 11, "cyan"),
+        )
+        assertEquals(1, shifted.size)
+        assertEquals(12, shifted[0].start)
+        assertEquals(17, shifted[0].end)
+
+        val cleared = HighlightTextUtils.removeHighlightInRange(second, 6, 10)
+        assertEquals(1, cleared.size)
+        assertEquals("yellow", cleared[0].colorKey)
+
+        val preset = StudyJsonCodec.linearPreset()
+        val encoded = StudyJsonCodec.encodeDiagram(preset)
+        val decoded = StudyJsonCodec.parseDiagram(encoded)
+        assertEquals(preset.nodes.size, decoded.nodes.size)
+        assertEquals(preset.edges.size, decoded.edges.size)
+        assertEquals("Boshlash", decoded.nodes.first().label)
     }
 }
 

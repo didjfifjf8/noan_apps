@@ -78,12 +78,23 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import com.example.ui.viewmodel.NoteEditorDraft
 import com.example.ui.viewmodel.NotesViewModel
+import com.example.ui.viewmodel.StudyBookViewModel
+
+private enum class NotesSubSection {
+    NOTES,
+    KITOBCHA,
+}
 
 @Composable
 fun NotesScreen(
     viewModel: NotesViewModel,
+    studyBookViewModel: StudyBookViewModel,
     onCopyCodeToEditor: (title: String, code: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -93,9 +104,10 @@ fun NotesScreen(
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val editingNote by viewModel.editingNote.collectAsStateWithLifecycle()
 
+    var subSection by rememberSaveable { mutableStateOf(NotesSubSection.NOTES) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
 
-    if (editingNote != null) {
+    if (subSection == NotesSubSection.NOTES && editingNote != null) {
         BackHandler { viewModel.closeNoteEditor() }
         NoteDetailEditor(
             draft = editingNote!!,
@@ -111,35 +123,46 @@ fun NotesScreen(
         return
     }
 
+    if (subSection == NotesSubSection.KITOBCHA) {
+        StudyBookScreen(
+            viewModel = studyBookViewModel,
+            onCopyCodeToEditor = onCopyCodeToEditor,
+            modifier = modifier,
+            topHeaderContent = {
+                NotesTopHeader(
+                    subSection = subSection,
+                    onSelectSubSection = { subSection = it },
+                    notesCount = notes.size,
+                    topicsCount = studyBookViewModel.topics.collectAsStateWithLifecycle().value.size,
+                    onCreateFolderClick = { showCreateFolderDialog = true },
+                )
+            },
+        )
+        if (showCreateFolderDialog) {
+            CreateFolderDialog(
+                onDismiss = { showCreateFolderDialog = false },
+                onCreate = { name ->
+                    viewModel.createFolder(name)
+                    showCreateFolderDialog = false
+                },
+            )
+        }
+        return
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(BgCanvas),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(BgSurface)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("My Notes", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
-                    Text(
-                        text = "${notes.size} Python notes • Auto-saved offline",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                    )
-                }
-                IconButton(
-                    onClick = { showCreateFolderDialog = true },
-                    modifier = Modifier.testTag("notes_add_folder_button"),
-                ) {
-                    Icon(Icons.Filled.CreateNewFolder, contentDescription = "New Folder", tint = AccentCyan)
-                }
-            }
+            NotesTopHeader(
+                subSection = subSection,
+                onSelectSubSection = { subSection = it },
+                notesCount = notes.size,
+                topicsCount = studyBookViewModel.topics.collectAsStateWithLifecycle().value.size,
+                onCreateFolderClick = { showCreateFolderDialog = true },
+            )
 
             // Search Notes
             OutlinedTextField(
@@ -233,44 +256,169 @@ fun NotesScreen(
     }
 
     if (showCreateFolderDialog) {
-        var folderName by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showCreateFolderDialog = false },
-            containerColor = BgSurface,
-            title = { Text("Create Note Folder", color = TextPrimary) },
-            text = {
-                OutlinedTextField(
-                    value = folderName,
-                    onValueChange = { folderName = it },
-                    placeholder = { Text("e.g. Dynamic Programming", color = TextMuted) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentCyan,
-                        unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("new_folder_input"),
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.createFolder(folderName)
-                        showCreateFolderDialog = false
-                    },
-                    enabled = folderName.isNotBlank(),
-                ) {
-                    Text("Create")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateFolderDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
-                }
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { folderName ->
+                viewModel.createFolder(folderName)
+                showCreateFolderDialog = false
             },
         )
     }
+}
+
+@Composable
+private fun NotesTopHeader(
+    subSection: NotesSubSection,
+    onSelectSubSection: (NotesSubSection) -> Unit,
+    notesCount: Int,
+    topicsCount: Int,
+    onCreateFolderClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BgSurface)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("My Notes", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+                Text(
+                    text = if (subSection == NotesSubSection.NOTES) {
+                        "$notesCount ta qayd • Avtomatik saqlanadi"
+                    } else {
+                        "$topicsCount ta mavzu • Kitobcha offline saqlanadi"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
+            IconButton(
+                onClick = onCreateFolderClick,
+                modifier = Modifier.testTag("notes_add_folder_button"),
+            ) {
+                Icon(Icons.Filled.CreateNewFolder, contentDescription = "New Folder", tint = AccentCyan)
+            }
+        }
+
+        // Segmented Pill Switcher: Qaydlar | Kitobcha
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BgCanvas, RoundedCornerShape(12.dp))
+                .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            NotesSegmentedTab(
+                selected = subSection == NotesSubSection.NOTES,
+                label = "Qaydlar",
+                icon = Icons.Filled.NoteAlt,
+                tag = "notes_mode_notes",
+                onClick = { onSelectSubSection(NotesSubSection.NOTES) },
+                modifier = Modifier.weight(1f),
+            )
+            NotesSegmentedTab(
+                selected = subSection == NotesSubSection.KITOBCHA,
+                label = "Kitobcha",
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+                tag = "notes_mode_kitobcha",
+                onClick = { onSelectSubSection(NotesSubSection.KITOBCHA) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotesSegmentedTab(
+    selected: Boolean,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = if (selected) AccentCyan.copy(alpha = 0.18f) else BgCanvas,
+        shape = RoundedCornerShape(9.dp),
+        modifier = modifier
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .then(
+                if (selected) Modifier.border(1.dp, AccentCyan.copy(alpha = 0.6f), RoundedCornerShape(9.dp))
+                else Modifier
+            )
+            .clickable(onClick = onClick)
+            .testTag(tag),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) AccentCyan else TextSecondary,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) AccentCyan else TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateFolderDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var folderName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BgSurface,
+        title = { Text("Create Note Folder", color = TextPrimary) },
+        text = {
+            OutlinedTextField(
+                value = folderName,
+                onValueChange = { folderName = it },
+                placeholder = { Text("e.g. Dynamic Programming", color = TextMuted) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentCyan,
+                    unfocusedBorderColor = BorderSubtle,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                ),
+                modifier = Modifier.fillMaxWidth().testTag("new_folder_input"),
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onCreate(folderName) },
+                enabled = folderName.isNotBlank(),
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        },
+    )
 }
 
 @Composable

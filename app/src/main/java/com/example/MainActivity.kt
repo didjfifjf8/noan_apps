@@ -60,6 +60,7 @@ import com.example.ui.viewmodel.LibrariesViewModel
 import com.example.ui.viewmodel.NotesViewModel
 import com.example.ui.viewmodel.ProjectsViewModel
 import com.example.ui.viewmodel.SettingsViewModel
+import com.example.ui.viewmodel.StudyBookViewModel
 
 enum class MainNavDestination(
     val label: String,
@@ -99,6 +100,9 @@ fun PyForgeRoot() {
     val notesViewModel = remember {
         NotesViewModel(app.notesRepository)
     }
+    val studyBookViewModel = remember {
+        StudyBookViewModel(app.studyBookRepository, app.notesRepository)
+    }
     val projectsViewModel = remember {
         ProjectsViewModel(app.workspaceRepository)
     }
@@ -110,6 +114,7 @@ fun PyForgeRoot() {
         editorViewModel = editorViewModel,
         librariesViewModel = librariesViewModel,
         notesViewModel = notesViewModel,
+        studyBookViewModel = studyBookViewModel,
         projectsViewModel = projectsViewModel,
         settingsViewModel = settingsViewModel,
     )
@@ -120,6 +125,7 @@ fun PyForgeAppShell(
     editorViewModel: EditorViewModel,
     librariesViewModel: LibrariesViewModel,
     notesViewModel: NotesViewModel,
+    studyBookViewModel: StudyBookViewModel,
     projectsViewModel: ProjectsViewModel,
     settingsViewModel: SettingsViewModel,
 ) {
@@ -219,6 +225,7 @@ fun PyForgeAppShell(
                     )
                     MainNavDestination.NOTES -> NotesScreen(
                         viewModel = notesViewModel,
+                        studyBookViewModel = studyBookViewModel,
                         onCopyCodeToEditor = { title, code ->
                             editorViewModel.insertCodeFromNote(title, code)
                             currentTab = MainNavDestination.EDITOR
